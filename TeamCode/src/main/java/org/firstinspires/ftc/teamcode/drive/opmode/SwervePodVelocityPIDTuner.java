@@ -9,7 +9,6 @@ import static org.firstinspires.ftc.teamcode.drive.DriveConstants.kV;
 import com.acmerobotics.dashboard.FtcDashboard;
 import com.acmerobotics.dashboard.config.Config;
 import com.acmerobotics.dashboard.telemetry.MultipleTelemetry;
-import com.acmerobotics.roadrunner.geometry.Pose2d;
 import com.acmerobotics.roadrunner.profile.MotionProfile;
 import com.acmerobotics.roadrunner.profile.MotionProfileGenerator;
 import com.acmerobotics.roadrunner.profile.MotionState;
@@ -20,7 +19,7 @@ import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.util.RobotLog;
 
 import org.firstinspires.ftc.robotcore.external.Telemetry;
-import org.firstinspires.ftc.teamcode.drive.SampleMecanumDrive;
+import org.firstinspires.ftc.teamcode.drive.SwerveDriveForVelocityTuning;
 
 import java.util.List;
 
@@ -50,13 +49,8 @@ import java.util.List;
  */
 @Config
 @Autonomous(group = "drive")
-public class DriveVelocityPIDTuner extends LinearOpMode {
+public class SwervePodVelocityPIDTuner extends LinearOpMode {
     public static double DISTANCE = 72; // in
-
-    enum Mode {
-        DRIVER_MODE,
-        TUNING_MODE
-    }
 
     private static MotionProfile generateProfile(boolean movingForward) {
         MotionState start = new MotionState(movingForward ? 0 : DISTANCE, 0, 0, 0);
@@ -73,16 +67,14 @@ public class DriveVelocityPIDTuner extends LinearOpMode {
 
         Telemetry telemetry = new MultipleTelemetry(this.telemetry, FtcDashboard.getInstance().getTelemetry());
 
-        SampleMecanumDrive drive = new SampleMecanumDrive(hardwareMap);
-
-        Mode mode = Mode.TUNING_MODE;
+        SwerveDriveForVelocityTuning drive = new SwerveDriveForVelocityTuning(hardwareMap);
 
         double lastKp = MOTOR_VELO_PID_UNIVERSAL.p;
         double lastKi = MOTOR_VELO_PID_UNIVERSAL.i;
         double lastKd = MOTOR_VELO_PID_UNIVERSAL.d;
         double lastKf = MOTOR_VELO_PID_UNIVERSAL.f;
 
-        drive.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, MOTOR_VELO_PID_UNIVERSAL);
+        drive.setAllMotorPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, MOTOR_VELO_PID_UNIVERSAL);
 
         NanoClock clock = NanoClock.system();
 
@@ -100,64 +92,35 @@ public class DriveVelocityPIDTuner extends LinearOpMode {
 
 
         while (!isStopRequested()) {
-            telemetry.addData("mode", mode);
+            // calculate and set the motor power
+            double profileTime = clock.seconds() - profileStart;
 
-            switch (mode) {
-                case TUNING_MODE:
-                    if (gamepad1.y) {
-                        mode = Mode.DRIVER_MODE;
-                        drive.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
-                    }
+            if (profileTime > activeProfile.duration()) {
+                // generate a new profile
+                movingForwards = !movingForwards;
+                activeProfile = generateProfile(movingForwards);
+                profileStart = clock.seconds();
+            }
 
-                    // calculate and set the motor power
-                    double profileTime = clock.seconds() - profileStart;
+            MotionState motionState = activeProfile.get(profileTime);
+            double targetPower = kV * motionState.getV();
+            drive.setMotorPowers(targetPower, targetPower, targetPower, targetPower);
 
-                    if (profileTime > activeProfile.duration()) {
-                        // generate a new profile
-                        movingForwards = !movingForwards;
-                        activeProfile = generateProfile(movingForwards);
-                        profileStart = clock.seconds();
-                    }
+            List<Double> velocities = drive.getWheelVelocities();
 
-                    MotionState motionState = activeProfile.get(profileTime);
-                    double targetPower = kV * motionState.getV();
-                    drive.setDrivePower(new Pose2d(targetPower, 0, 0));
-
-                    List<Double> velocities = drive.getWheelVelocities();
-
-                    // update telemetry
-                    telemetry.addData("targetVelocity", motionState.getV());
-                    for (int i = 0; i < velocities.size(); i++) {
-                        telemetry.addData("measuredVelocity" + i, velocities.get(i));
-                        telemetry.addData(
-                                "error" + i,
-                                motionState.getV() - velocities.get(i)
-                        );
-                    }
-                    break;
-                case DRIVER_MODE:
-                    if (gamepad1.b) {
-                        drive.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
-
-                        mode = Mode.TUNING_MODE;
-                        movingForwards = true;
-                        activeProfile = generateProfile(movingForwards);
-                        profileStart = clock.seconds();
-                    }
-
-                    drive.setWeightedDrivePower(
-                            new Pose2d(
-                                    -gamepad1.left_stick_y,
-                                    -gamepad1.left_stick_x,
-                                    -gamepad1.right_stick_x
-                            )
-                    );
-                    break;
+            // update telemetry
+            telemetry.addData("targetVelocity", motionState.getV());
+            for (int i = 0; i < velocities.size(); i++) {
+                telemetry.addData("measuredVelocity" + i, velocities.get(i));
+                telemetry.addData(
+                        "error" + i,
+                        motionState.getV() - velocities.get(i)
+                );
             }
 
             if (lastKp != MOTOR_VELO_PID_UNIVERSAL.p || lastKd != MOTOR_VELO_PID_UNIVERSAL.d
                     || lastKi != MOTOR_VELO_PID_UNIVERSAL.i || lastKf != MOTOR_VELO_PID_UNIVERSAL.f) {
-                drive.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, MOTOR_VELO_PID_UNIVERSAL);
+                drive.setAllMotorPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, MOTOR_VELO_PID_UNIVERSAL);
 
                 lastKp = MOTOR_VELO_PID_UNIVERSAL.p;
                 lastKi = MOTOR_VELO_PID_UNIVERSAL.i;
